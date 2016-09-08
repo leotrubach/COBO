@@ -1,112 +1,138 @@
+from __future__ import print_function
+import argparse
+import logging
+import os
+import os.path
 import subprocess
 import sys
-import scipy
+
 import scipy.optimize
 
-args = sys.argv[1:]
 
-correlation = 0
-
-# d=20, pv=10 previous setting
-
-depth = int(args[1])
-engine = args[0]
-multipv = 1
-verbose = False
+class TunerException(Exception):
+    pass
 
 
-def get_pars():
-    sf = subprocess.Popen('./' + engine, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                          universal_newlines=True, bufsize=1)
-    sf.stdin.write('isready' + '\n')
-    pars = []
-    while True:
-        outline = sf.stdout.readline().rstrip()
-        print outline
-        if outline == 'readyok':
-            break
-        if not outline.startswith('Stockfish'):
-            pars.append(outline.split(','))
+class Tuner(object):
+    def __init__(self, engine_path, depth, multipv=1, hash=16):
+        self.depth = depth
+        self.multipv = multipv
+        self.hash = hash
+        self.engine_path = engine_path
+        self.pars = self._get_pars()
+        self.param_names = [p[0] for p in self.pars]
 
-    return pars
+    def _start_engine(self):
+        self._sf = subprocess.Popen(
+            os.path.join(os.getcwd(), self.engine_path),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            universal_newlines=True, bufsize=1)
+        self.engine_running = True
 
+    def _stop_engine(self):
+        self.engine.kill()
+        self.engine_running = False
 
-Pars = get_pars()
+    @property
+    def engine(self):
+        if not self.engine_running:
+            self._start_engine()
+        return self._sf
 
+    def _get_pars(self):
+        self.engine.stdin.write('isready\n')
+        pars = []
+        while True:
+            outline = self.engine.stdout.readline().rstrip()
+            logging.debug(outline)
+            if outline == 'readyok':
+                break
+            if not outline.startswith('Stockfish'):
+                pars.append(outline.split(','))
+        return pars
 
-def launch_sf(locpars):
-    if verbose:
-        for p in locpars:
-            print p[0], p[1]
-    sf = subprocess.Popen('./' + engine, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                          universal_newlines=True, bufsize=1)
-    sf.stdin.write('setoption name multipv value ' + str(multipv) + '\n')
-    sf.stdin.write('setoption name Hash value 16' + '\n')
+    def _parse_benchmark(self):
+        correlation, depth = None, None
+        output_lines = []
+        while True:
+            outline = self.engine.stdout.readline().rstrip()
+            output_lines.append(outline)
+            if outline.startswith('Search/eval correlation'):
+                correlation = float(outline.split()[2])
+            if outline.startswith('info depth'):
+                depth = int(outline.split()[2])
 
-    for par in locpars:
-        cmd = 'setoption name ' + par[0] + ' value ' + str(par[1]) + '\n'
-        sf.stdin.write(cmd)
+            if outline.startswith('Total time'):
+                if correlation and depth:
+                    return correlation, depth
+                else:
+                    logging.error('Could not parse benchmark output:\n%s', '\n'.join(output_lines))
+                    raise TunerException('Benchmark parse error')
 
-    sf.stdin.write('go depth ' + str(depth) + '\n')
-    sf.stdin.write('bench 16 1 ' + str(depth - 10) + ' balancedMiddlegames.epd\n')
-    sf.stdin.write('bench 16 1 ' + str(depth - 13) + ' balancedEndgames.epd\n')
-    how_many_benches = 0
+    def run_benchmarks(self):
+        for p in self.pars:
+            logging.debug('%s %s', p[0], p[1])
+        self.engine.stdin.write('setoption name multipv value {}\n'.format(self.multipv))
+        self.engine.stdin.write('setoption name Hash value {}\n'.format(self.hash))
 
+        for par in self.pars:
+            cmd = 'setoption name {par[0]} value {par[1]}\n'.format(par=par)
+            self.engine.stdin.write(cmd)
 
-    while True:
-        if how_many_benches == 2:
-            break
-        outline = sf.stdout.readline().rstrip()
-        if outline.startswith('Search/eval correlation'):
-            correlation_line = outline
-            print '\r' + outline + ' ',
-        if outline.startswith('info depth') and verbose:
-            print '\n' + outline + ' ',
+        self.engine.stdin.write('go depth {}\n'.format(self.depth))
+        self.engine.stdin.write('bench 16 1 {} balancedMiddlegames.epd\n'.format(self.depth - 10))
+        self.engine.stdin.write('bench 16 1 {} balancedEndgames.epd\n'.format(self.depth - 13))
 
-        if outline.startswith('Total time'):
-            how_many_benches += 1
+        benchmark_results = [self._parse_benchmark() for _ in range(2)]
+        for br in benchmark_results:
+            logging.info('Search/eval correlation {} depth {}', br[0], br[1])
+        result = benchmark_results[-1][0]
 
-    result = float(correlation_line.split()[2])
-    if verbose:
-        print '\n' + str(result)
-    sf.kill()
-    return result
+        logging.debug('Result: %s', result)
+        self._stop_engine()
+        return result
 
+    def apply_pars(self, pars_array):
+        for n, par in enumerate(pars_array):
+            self.pars[n][1] = int(round(float(pars_array[n])))
 
-def array2pars(pars_array):
-    locpars = Pars
-    for n, par in enumerate(locpars):
-        locpars[n][1] = int(round(float(pars_array[n])))
-    return locpars
+    def pars2array(self):
+        return [par[1] for par in self.pars]
 
+    def get_bounds(self):
+        return [(p[2], p[3]) for p in self.pars]
 
-def pars2array(pars):
-    pars_array = [par[1] for par in pars]
-    return pars_array
+    def fitness(self, pars_array=None):
+        if pars_array:
+            self.apply_pars(pars_array)
+        return -self.run_benchmarks()
 
-
-def fitness(parsArray):
-    locpars = array2pars(parsArray)
-    return -launch_sf(locpars)
-
-
-def get_bounds():
-    return [(p[2], p[3]) for p in Pars]
-
-
-def status_msg(xk, convergence=0):
-    new_pars = array2pars(xk)
-    print
-    for p in new_pars:
-        print p[0], p[1]
-    print
-    return False
+    def print_status_msg(self, xk, convergence=0):
+        for name, p in zip(self.param_names, xk):
+            print('{} {}'.format(name, p))
+        return False
 
 
 if __name__ == '__main__':
-    f = fitness(pars2array(Pars))
-    print
-    '\n' + 'Reference correlation: ' + str(-f)
-    res = scipy.optimize.differential_evolution(fitness, get_bounds(), disp=True, callback=status_msg)
-    status_msg(res.x)
-    print 'Search/eval correlation: ', -res.fun
+    parser = argparse.ArgumentParser()
+    parser.add_argument('engine', help='Engine executable')
+    parser.add_argument('depth', type=int, help='Search depth')
+    parser.add_argument('--verbose', action='store_true')
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level='DEBUG')
+    else:
+        logging.basicConfig(level='INFO')
+    t = Tuner(args.engine, args.depth)
+
+    if not t.pars:
+        logging.warning('No parameters to tune')
+        exit(1)
+
+    f = t.fitness()
+    logging.info('Reference correlation: {}', f)
+
+    res = scipy.optimize.differential_evolution(t.fitness, t.get_bounds(), disp=True, callback=t.print_status_msg)
+    t.print_status_msg(res.x)
+    print('Search/eval correlation: {}'.format(-res.fun))
