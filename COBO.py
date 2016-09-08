@@ -122,9 +122,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.verbose:
-        logging.basicConfig(level='DEBUG')
+        logging.basicConfig(format='%(message)s', level='DEBUG')
     else:
-        logging.basicConfig(level='INFO')
+        logging.basicConfig(format='%(message)s', level='INFO')
     t = Tuner(args.engine, args.depth)
 
     if not t.pars:
