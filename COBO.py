@@ -19,6 +19,7 @@ class Tuner(object):
         self.multipv = multipv
         self.hash = hash
         self.engine_path = engine_path
+        self.engine_running = False
         self.pars = self._get_pars()
         self.param_names = [p[0] for p in self.pars]
 
