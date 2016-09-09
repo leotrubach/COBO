@@ -118,6 +118,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('engine', help='Engine executable')
     parser.add_argument('depth', type=int, help='Search depth')
+    parser.add_argument('--popsize', type=int)
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
@@ -134,6 +135,13 @@ if __name__ == '__main__':
     f = t.fitness()
     logging.info('Reference correlation: {}', f)
 
-    res = scipy.optimize.differential_evolution(t.fitness, t.get_bounds(), disp=True, callback=t.print_status_msg)
+    optimizer_kwargs = {
+        'disp': True,
+        'callback': t.print_status_msg
+    }
+    if args.popsize:
+        optimizer_kwargs['popsize'] = args.popsize
+
+    res = scipy.optimize.differential_evolution(t.fitness, t.get_bounds(), **optimizer_kwargs)
     t.print_status_msg(res.x)
     print('Search/eval correlation: {}'.format(-res.fun))
