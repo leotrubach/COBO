@@ -121,13 +121,14 @@ if __name__ == '__main__':
     parser.add_argument('depth', type=int, help='Search depth')
     parser.add_argument('--popsize', type=int)
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--pv', type=int, default=1)
     args = parser.parse_args()
 
     if args.verbose:
         logging.basicConfig(format='%(message)s', level='DEBUG')
     else:
         logging.basicConfig(format='%(message)s', level='INFO')
-    t = Tuner(args.engine, args.depth)
+    t = Tuner(args.engine, args.depth, args.pv)
 
     if not t.pars:
         logging.warning('No parameters to tune')
