@@ -14,7 +14,7 @@ class TunerException(Exception):
 
 
 class Tuner(object):
-    def __init__(self, engine_path, depth, multipv=1, hash=16):
+    def __init__(self, engine_path, depth, multipv=1, hash=2048):
         self.depth = depth
         self.multipv = multipv
         self.hash = hash
@@ -31,7 +31,8 @@ class Tuner(object):
         self.engine_running = True
 
     def _stop_engine(self):
-        self.engine.kill()
+        self.engine.terminate()
+        self.engine.wait()
         self.engine_running = False
 
     @property
