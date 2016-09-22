@@ -87,7 +87,7 @@ class Tuner(object):
 
         benchmark_results = [self._parse_benchmark() for _ in range(2)]
         for br in benchmark_results:
-            logging.info('Search/eval correlation {} depth {}', br[0], br[1])
+            logging.info('Search/eval correlation %s depth %s', br[0], br[1])
         result = benchmark_results[-1][0]
 
         logging.debug('Result: %s', result)
